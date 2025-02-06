@@ -402,7 +402,7 @@ def move_orders_to_excel(phone, orders_json_path=ORDERS_JSON, orders_excel_path=
         try:
             orders_df = pd.read_excel(orders_excel_path)
         except FileNotFoundError:
-            orders_df = pd.DataFrame(columns=["Номер телефона", "Дата", "День недели", "Обед", "Цена", "Статус оплаты"])
+            orders_df = pd.DataFrame(columns=["Номер телефона", "Дата", "День недели", "Обед", "Цена", "Статус оплаты", "Имя заказчика", "Адрес доставки"])
 
         new_orders_df = pd.DataFrame(user_orders)
         orders_df = pd.concat([orders_df, new_orders_df], ignore_index=True)
@@ -518,7 +518,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "Сделать заказ":
             await show_menu(update, context)
         elif text == "Корзина":
-            #await show_orders(update, context)
             await show_cart(update, context)
         elif text == "Список заказов":
             await show_all_orders(update, context)
@@ -705,8 +704,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 async def handle_drink(update: Update, context: ContextTypes.DEFAULT_TYPE, drink_name: str):
+    user_data = load_user_data()
     try:
             phone = context.user_data.get("phone_number")
+            user = next((u for u in user_data["users"] if u["phone"] == phone), None)
             if phone is None:
                 await update.message.reply_text("Ваш номер телефона не зарегистрирован, перезапустите бота!")
                 return
@@ -715,6 +716,11 @@ async def handle_drink(update: Update, context: ContextTypes.DEFAULT_TYPE, drink
                 await update.message.reply_text("Выберите дату, прежде чем заказывать обед.")
                 return
             selected_day_name = context.user_data.get("selected_day_name")
+            address = user['address']
+            if address is None:
+                await update.message.reply_text("Вы не выбрали адрес, перезапустите бота!")
+                return
+
             try:
                 menu_data = pd.read_csv(MENU)
                 drink_price = dict(zip(menu_data['Блюдо'], menu_data['Цена']))
@@ -743,7 +749,9 @@ async def handle_drink(update: Update, context: ContextTypes.DEFAULT_TYPE, drink
                 "День недели": selected_day_name,
                 "Обед": drink_name,
                 "Цена": int(price),
-                "Статус оплаты": "Не оплачено"
+                "Статус оплаты": "Не оплачено",
+                "Адрес доставки": address,
+                "Имя заказчика": user["name"]
                 }
                 try:
                     with open(ORDERS_JSON, 'r', encoding='utf-8') as f:
@@ -771,8 +779,10 @@ async def handle_drink(update: Update, context: ContextTypes.DEFAULT_TYPE, drink
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 async def handle_salad(update: Update, context: ContextTypes.DEFAULT_TYPE, salad_name: str):
+    user_data = load_user_data()
     try:
             phone = context.user_data.get("phone_number")
+            user = next((u for u in user_data["users"] if u["phone"] == phone), None)
             if phone is None:
                 await update.message.reply_text("Ваш номер телефона не зарегистрирован, перезапустите бота!")
                 return
@@ -781,6 +791,10 @@ async def handle_salad(update: Update, context: ContextTypes.DEFAULT_TYPE, salad
                 await update.message.reply_text("Выберите дату, прежде чем заказывать обед.")
                 return
             selected_day_name = context.user_data.get("selected_day_name")
+            address = user['address']
+            if address is None:
+                await update.message.reply_text("Вы не выбрали адрес, перезапустите бота!")
+                return
             try:
                 menu_data = pd.read_csv(MENU)
                 salad_price = dict(zip(menu_data['Блюдо'], menu_data['Цена']))
@@ -809,7 +823,9 @@ async def handle_salad(update: Update, context: ContextTypes.DEFAULT_TYPE, salad
                 "День недели": selected_day_name,
                 "Обед": salad_name,
                 "Цена": int(price),
-                "Статус оплаты": "Не оплачено"
+                "Статус оплаты": "Не оплачено",
+                "Адрес доставки": address,
+                "Имя заказчика": user["name"]
                 }
                 try:
                     with open(ORDERS_JSON, 'r', encoding='utf-8') as f:
@@ -837,8 +853,10 @@ async def handle_salad(update: Update, context: ContextTypes.DEFAULT_TYPE, salad
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 async def handle_complex_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE, lunch_name: str):
+    user_data = load_user_data()
     try:
         phone = context.user_data.get("phone_number")
+        user = next((u for u in user_data["users"] if u["phone"] == phone), None)
         if phone is None:
             await update.message.reply_text("Ваш номер телефона не зарегистрирован, перезапустите бота!")
             return
@@ -848,6 +866,10 @@ async def handle_complex_lunch(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("Выберите дату, прежде чем заказывать обед.")
             return
         selected_day_name = context.user_data.get("selected_day_name")
+        address = user['address']
+        if address is None:
+            await update.message.reply_text("Вы не выбрали адрес, перезапустите бота!")
+            return
         try:
             menu_data = pd.read_csv(MENU)
             lunch_prices = dict(zip(menu_data['Название'], menu_data['Цена']))
@@ -877,7 +899,9 @@ async def handle_complex_lunch(update: Update, context: ContextTypes.DEFAULT_TYP
             "День недели": selected_day_name,
             "Обед": lunch_name,
             "Цена": int(price),
-            "Статус оплаты": "Не оплачено"
+            "Статус оплаты": "Не оплачено",
+            "Адрес доставки": address,
+            "Имя заказчика": user["name"]
             }
             try:
                 with open(ORDERS_JSON, 'r', encoding='utf-8') as f:
