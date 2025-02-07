@@ -1,14 +1,18 @@
+import emoji
 import re
 import json
 import logging
 import pandas as pd
+from numpy.ma.core import count
+from openpyxl.styles.builtins import total
+from pandas import value_counts
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 )
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date
 
 #logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,7 +22,7 @@ DATA_FILE = "Data.json"
 ORDERS = "Заказы.xlsx"
 MENU = "https://docs.google.com/spreadsheets/d/1eEEHGwtSV2znQDGJcgGVEQ2PzNTLoDPOT-9vtyQCoQY/export?format=csv"
 ADDRESSES_FILE = "Addresses.json" 
-TOKEN = "5744906470:AAG0wkuqLSIBxiUjYXupwLglOpg-GzFgyV8"
+TOKEN = "8154269678:AAE-CLwwQi6ZHW_nQvgoDERzG6lsqt37htY"
 ORDERS_JSON = "Orders.json"
 
 CHOOSE_ADDRESS, ENTER_NAME, BROADCAST_MESSAGE, ADD_ADDRESS = range(4)
@@ -81,7 +85,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if user:
                 keyboard = get_role_keyboard(user.get("role", "Заказчик"))
                 await update.message.reply_text(
-                    f"Добро пожаловать, {user['name']}! Ваша роль: {user['role']}.",
+                    f"Добро пожаловать, {user['name']}! Ваша роль 🙋‍♂️: {user['role']}.",
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
                 return
@@ -115,7 +119,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 keyboard = get_role_keyboard(user.get("role", "Заказчик"))
                 await update.message.reply_text(
-                    f"Добро пожаловать, {user['name']}! Ваша роль: {user['role']}.",
+                    f"Добро пожаловать, {user['name']}! Ваша роль 🙋‍♂️: {user['role']}.",
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
             else:
@@ -129,7 +133,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["phone_number"] = phone_number
                 keyboard = [[InlineKeyboardButton(address, callback_data=address)] for address in addresses]
                 await update.message.reply_text(
-                    "Выберите адрес доставки:",
+                    "Выберите адрес доставки 🏘:",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 return CHOOSE_ADDRESS
@@ -149,7 +153,7 @@ def get_role_keyboard(role):
     if role == "Администратор":
         return [["Список заказов", "Сообщить всем"], ["Добавить адрес доставки", "Выгрузка заказов"]]
     elif role == "Заказчик":
-        return [["Сделать заказ", "Корзина"]]  
+        return [["Сделать заказ 🍴", "Корзина 🗑"]]
 
 async def choose_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -207,7 +211,7 @@ async def enter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now()
     days = [today + timedelta(days=i) for i in range(7)]
-    cutoff_time = time(10, 00) #ТУТ МЕНЯТЬ ВРЕМЯ 10 - ЧАСЫ; 00 - МИНУТЫ!!!!!!!!!!!!!!!!!!!!!!!!!
+    cutoff_time = time(20, 00) #ТУТ МЕНЯТЬ ВРЕМЯ 10 - ЧАСЫ; 00 - МИНУТЫ!!!!!!!!!!!!!!!!!!!!!!!!!
 
     keyboard = []
     days_of_week = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
@@ -220,7 +224,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Выберите дату:", reply_markup=reply_markup)
+    await update.message.reply_text("Выберите дату 📆:", reply_markup=reply_markup)
 
 async def handle_menu_and_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if isinstance(update, Update) and update.callback_query:
@@ -232,7 +236,7 @@ async def handle_menu_and_lunch(update: Update, context: ContextTypes.DEFAULT_TY
         selected_day_name = days_of_week[day_index]
 
         await query.answer()
-        await query.edit_message_text(f"Вы выбрали дату: {selected_date_str} ({selected_day_name})")
+        await query.edit_message_text(f"Вы выбрали дату 📆: {selected_date_str} ({selected_day_name})")
         context.user_data["selected_date"] = selected_date_str
         context.user_data["selected_day_name"] = selected_day_name
 
@@ -277,10 +281,10 @@ async def handle_menu_and_lunch(update: Update, context: ContextTypes.DEFAULT_TY
                 row = [KeyboardButton(option) for option in salads]
                 keyboard.append(row)
 
-            keyboard.append([KeyboardButton("Назад")])
-            keyboard.append([KeyboardButton("Корзина")])
+            keyboard.append([KeyboardButton("Назад 🔙")])
+            keyboard.append([KeyboardButton("Корзина 🗑")])
             reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
-            await query.message.reply_text("Выберите обед:", reply_markup=reply_markup)
+            await query.message.reply_text("Выберите обед 🍜:", reply_markup=reply_markup)
 
         except Exception as e:
             await query.message.reply_text(f"Ошибка при загрузке меню: {e}")
@@ -419,30 +423,6 @@ def move_orders_to_excel(phone, orders_json_path=ORDERS_JSON, orders_excel_path=
     except Exception as e:
         return False
 
-async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        orders_df = pd.read_excel(ORDERS, engine='openpyxl')
-        
-        if orders_df.empty:
-            await update.message.reply_text("Заказов пока нет.")
-            return
-        
-        orders_text = "Список всех заказов:\n\n"
-        for index, row in orders_df.iterrows():
-            orders_text += (
-                f" *Дата*: {row['Дата']} ({row['День недели']})\n"
-                f" *Обед*: {row['Обед']}\n"
-                f" *Цена*: {row['Цена']} рублей\n"
-            )
-        
-        await update.message.reply_text(orders_text, parse_mode="Markdown")
-    
-    except FileNotFoundError:
-        await update.message.reply_text("Файл с заказами не найден.")
-    
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка чтения файла заказов: {e}")
-
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if context.user_data.get("role") == "Администратор":
@@ -476,7 +456,7 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id = user.get("chat_id")
             if chat_id:
                 try:
-                    await context.bot.send_message(chat_id=chat_id, text=f"[Сообщение от администратора]\n{message}")
+                    await context.bot.send_message(chat_id=chat_id, text=f"[Сообщение от администратора ✉]\n{message}")
                 except Exception as e:
                     logger.error(f"Error sending message to {chat_id}: {e}")
 
@@ -491,10 +471,10 @@ async def add_address_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Роль пользователя в add_address_start: {role}")
 
     if role != "Администратор":
-        await update.message.reply_text("У вас нет прав для использования этой функции.")
+        await update.message.reply_text("У вас нет прав для использования этой функции ❌.")
         return
 
-    await update.message.reply_text("Введите адрес, который вы хотите добавить в список доступных для доставки.")
+    await update.message.reply_text("Введите адрес, который вы хотите добавить в список доступных для доставки 🏚.")
     return ADD_ADDRESS
 
 async def add_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -515,15 +495,15 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = update.message.text
         logger.info(f"Нажата кнопка: {text}")  # Логируем нажатую кнопку
 
-        if text == "Сделать заказ":
+        if text == "Сделать заказ 🍴":
             await show_menu(update, context)
-        elif text == "Корзина":
+        elif text == "Корзина 🗑":
             await show_cart(update, context)
         elif text == "Список заказов":
             await show_all_orders(update, context)
         elif text == "Сообщить всем":
             await broadcast_start(update, context)
-        elif text == "Добавить адрес доставки":
+        elif text == "Добавить адрес доставки ":
             await add_address_start(update, context)
         elif text == "Импорт chat_id":
             await import_chat_ids(update, context)
@@ -537,12 +517,12 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_salad(update, context, "Цезарь с сёмгой")
         elif text == "Цезарь с курицей":
             await handle_salad(update, context, "Цезарь с курицей")
-        elif text == "Оплатить":
+        elif text == "Оплатить 💳":
             if update.callback_query:
                     pass
             else:
                     await handle_payment_selection(update, context)
-        elif text == "Назад":
+        elif text == "Назад 🔙":
             await show_menu(update, context)
         elif text == "Нет, спасибо":
             await update.message.reply_text("Спасибо за ваш заказ! Если хотите что-то ещё, выберите из меню.")
@@ -685,7 +665,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         else:
             keyboard = [
-                ["Сделать заказ", "Корзина"]
+                ["Сделать заказ 🍴", "Корзина 🗑"]
             ]
 
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -930,7 +910,7 @@ async def handle_complex_lunch(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_option = update.message.text
-    if selected_option == "Оплатить":
+    if selected_option == "Оплатить 💳":
         phone = context.user_data.get("phone_number")
         if phone is None:
             await update.message.reply_text("Ваш номер телефона не зарегистрирован. Перезапустите бота!")
@@ -941,10 +921,10 @@ async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT
         else:
             await update.message.reply_text("Нет заказов для оплаты.")
 
-        payment_keyboard = [["Назад"]]
+        payment_keyboard = [["Назад 🔙"]]
         await update.message.reply_text("Для возвращения в меню нажмите Назад", reply_markup=ReplyKeyboardMarkup(payment_keyboard, resize_keyboard=True))
         return
-    elif selected_option == "Назад":
+    elif selected_option == "Назад 🔙":
         await show_menu(update, context)
 
 async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -989,7 +969,7 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f" *Цена*: {details['Цена']} рублей\n\n"
         )
 
-    keyboard = [["Оплатить", "Назад", "Очистить корзину"]]
+    keyboard = [["Оплатить 💳", "Назад 🔙", "Очистить корзину ❌"]]
     await update.message.reply_text(
         cart_message,
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
@@ -998,7 +978,7 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def import_chat_ids(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        
+
         if context.user_data.get("role") != "Администратор":
             await update.message.reply_text("У вас нет прав для использования этой функции.")
             return
@@ -1012,35 +992,38 @@ async def import_chat_ids(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка при импорте chat_id: {e}")
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
-async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+
+async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE, value = str):
+    if context.user_data.get("role") != "Администратор":
+        await update.message.reply_text("У вас нет прав для использования этой функции.")
+        return
     try:
-        if context.user_data.get("role") != "Администратор":
-            await update.message.reply_text("У вас нет прав для использования этой функции.")
-            return
-        try:
-            orders_df = pd.read_excel(ORDERS)
-        except FileNotFoundError:
-            await update.message.reply_text("Файл с заказами не найден.")
-            return
+        orders_df = pd.read_excel(ORDERS)
+    except FileNotFoundError:
+        await update.message.reply_text("Файл с заказами не найден.")
+        return
 
-        if orders_df.empty:
-            await update.message.reply_text("Заказов пока нет.")
-            return
+    if orders_df.empty:
+        await update.message.reply_text("Заказов пока нет.")
+        return
 
-        orders_text = "Список всех заказов:\n\n"
-        for index, row in orders_df.iterrows():
+    orders_text = "Список заказов на сегодня \n\n"
+    today  = datetime.today().date()
+    todaystr = today.strftime("%d.%m.%Y")
+    for index, row in orders_df.iterrows():
+        if row['Дата'] == todaystr:
             orders_text += (
-                f"Номер телефона: {row['Номер телефона']}\n"
-                f"Дата: {row['Дата']}\n"
-                f"Обед: {row['Обед']}\n"
-                f"Цена: {row['Цена']} рублей\n"
-                f"Статус оплаты: {row['Статус оплаты']}\n\n"
+            f"Номер телефона: {row['Номер телефона']}\n"
+            f"Дата: {row['Дата']}\n"
+            f"Обед: {row['Обед']}\n"
+            f"Цена: {row['Цена']} рублей\n"
+            f"Статус оплаты: {row['Статус оплаты']}\n"
+            f"Адрес доставки: {row['Адрес доставки']}\n"
+            f"Имя заказчика: {row['Имя заказчика']}\n\n"
             )
+    await update.message.reply_text(orders_text)
 
-        await update.message.reply_text(orders_text)
-    except Exception as e:
-        logger.error(f"Ошибка при отображении всех заказов: {e}")
-        await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 def main():
     try:
@@ -1075,7 +1058,7 @@ def main():
         application.add_handler(registration_handler)
         application.add_handler(broadcast_handler)
         application.add_handler(address_handler)
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))  
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
         application.add_handler(CallbackQueryHandler(handle_menu_and_lunch))
         application.add_handler(CallbackQueryHandler(handle_callback_query))
 
