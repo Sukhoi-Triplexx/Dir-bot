@@ -10,7 +10,8 @@ from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton
 )
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
+    Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler,
+    CallbackContext
 )
 from datetime import datetime, time, timedelta, date
 
@@ -24,6 +25,7 @@ MENU = "https://docs.google.com/spreadsheets/d/1eEEHGwtSV2znQDGJcgGVEQ2PzNTLoDPO
 ADDRESSES_FILE = "Addresses.json" 
 TOKEN = "8154269678:AAE-CLwwQi6ZHW_nQvgoDERzG6lsqt37htY"
 ORDERS_JSON = "Orders.json"
+CARD_NUMBER = "2222 3333 4444 5555"
 
 CHOOSE_ADDRESS, ENTER_NAME, BROADCAST_MESSAGE, ADD_ADDRESS = range(4)
 
@@ -76,6 +78,19 @@ def normalize_phone_number(phone_number):
         return digits
     return phone_number
 
+async def under_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    phone = context.user_data.get("phone verified")
+    if phone is None:
+        await update.message.reply_text(
+            "Пожалуйста, подтвердите согласие на обработку ПД \n https://telegra.ph/Soglasie-obrabotki-PD-02-10",
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton("Я согласен ✔")]],
+                resize_keyboard=True, one_time_keyboard=True
+            )
+        )
+    else:
+        await start(update, context)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_data = load_user_data()
@@ -89,7 +104,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
                 return
-            
+
         user = next((u for u in user_data["users"] if u.get("chat_id") == chat_id), None)
         if user:
             context.user_data["phone_verified"] = True
@@ -148,7 +163,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка в команде start: {e}")
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
-        
+
 def get_role_keyboard(role):
     if role == "Администратор":
         return [["Список заказов", "Сообщить всем"], ["Добавить адрес доставки", "Выгрузка заказов"]]
@@ -211,7 +226,7 @@ async def enter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now()
     days = [today + timedelta(days=i) for i in range(7)]
-    cutoff_time = time(20, 00) #ТУТ МЕНЯТЬ ВРЕМЯ 10 - ЧАСЫ; 00 - МИНУТЫ!!!!!!!!!!!!!!!!!!!!!!!!!
+    cutoff_time = time(10, 00) #ТУТ МЕНЯТЬ ВРЕМЯ 10 - ЧАСЫ; 00 - МИНУТЫ!!!!!!!!!!!!!!!!!!!!!!!!!
 
     keyboard = []
     days_of_week = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
@@ -346,8 +361,6 @@ async def handle_menu_and_lunch(update: Update, context: ContextTypes.DEFAULT_TY
                 "День недели": selected_day_name,
                 "Обед": message,
                 "Цена": int(price),
-                "Статус оплаты": "Не оплачено"
-                "Имя заказчика"
             }
             try:
                 with open(ORDERS_JSON, 'r', encoding='utf-8') as f:
@@ -394,7 +407,7 @@ async def handle_menu_and_lunch(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(f"Ошибка при записи заказа: {e}")
             return
 
-def move_orders_to_excel(phone, orders_json_path=ORDERS_JSON, orders_excel_path="Заказы.xlsx"):
+def move_orders_to_excel(phone, handle_payment_selection="Не оплачено", orders_json_path=ORDERS_JSON, orders_excel_path="Заказы.xlsx"):
     try:
         with open(orders_json_path, "r", encoding="utf-8") as f:
             orders = json.load(f)
@@ -403,6 +416,8 @@ def move_orders_to_excel(phone, orders_json_path=ORDERS_JSON, orders_excel_path=
         if not user_orders:
             return False
 
+        for order in user_orders:
+            order['Статус оплаты'] = handle_payment_selection
         try:
             orders_df = pd.read_excel(orders_excel_path)
         except FileNotFoundError:
@@ -505,8 +520,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await broadcast_start(update, context)
         elif text == "Добавить адрес доставки ":
             await add_address_start(update, context)
-        elif text == "Импорт chat_id":
-            await import_chat_ids(update, context)
         elif text == "Комплексный обед":
             await handle_complex_lunch(update, context, "Комплексный обед")
         elif text == "Морс":
@@ -517,7 +530,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_salad(update, context, "Цезарь с сёмгой")
         elif text == "Цезарь с курицей":
             await handle_salad(update, context, "Цезарь с курицей")
-        elif text == "Оплатить 💳":
+        elif text == "Оплатить картой💳":
             if update.callback_query:
                     pass
             else:
@@ -536,6 +549,14 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await clear_cart(update, context)
         elif text == "Выгрузка заказов":
             await import_excel(update, context)
+        elif text == "Оплатить наличными":
+            if update.callback_query:
+                pass
+            else:
+                await handle_payment_selection(update, context)
+        elif text == "Я согласен ✔":
+            await update.message.reply_text("Спасибо за согласие! Переходим к следующему шагу.")
+            await start(update, context)
         else:
             await update.message.reply_text("Неизвестная команда. Пожалуйста, выберите действие из меню.")
     except Exception as e:
@@ -614,8 +635,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         except ValueError:
             await query.edit_message_text(f"Некорректный формат даты: {data}. Используйте формат ДД.ММ.ГГГГ.")
     
-    else:
-        await query.edit_message_text("Неизвестная команда. Пожалуйста, выберите действие из меню.")
+    #else:
+        #await query.edit_message_text("Неизвестная команда. Пожалуйста, выберите действие из меню.")
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -879,7 +900,7 @@ async def handle_complex_lunch(update: Update, context: ContextTypes.DEFAULT_TYP
             "День недели": selected_day_name,
             "Обед": lunch_name,
             "Цена": int(price),
-            "Статус оплаты": "Не оплачено",
+            "Статус оплаты": "не оплачено",
             "Адрес доставки": address,
             "Имя заказчика": user["name"]
             }
@@ -910,19 +931,38 @@ async def handle_complex_lunch(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_option = update.message.text
-    if selected_option == "Оплатить 💳":
+    if selected_option == "Оплатить картой💳":
         phone = context.user_data.get("phone_number")
         if phone is None:
             await update.message.reply_text("Ваш номер телефона не зарегистрирован. Перезапустите бота!")
             return
-        success = move_orders_to_excel(phone)
+        success = move_orders_to_excel(phone, handle_payment_selection = "Картой")
+        if success:
+            await update.message.reply_text(f"Переведите на карту: " + CARD_NUMBER)
+        else:
+            await update.message.reply_text("Нет заказов для оплаты.")
+
+        payment_keyboard = [["Назад 🔙"]]
+        await update.message.reply_text("Для возвращения в меню нажмите Назад",
+                                        reply_markup=ReplyKeyboardMarkup(payment_keyboard, resize_keyboard=True))
+        return
+    elif selected_option == "Назад 🔙":
+        await show_menu(update, context)
+
+    if selected_option == "Оплатить наличными":
+        phone = context.user_data.get("phone_number")
+        if phone is None:
+            await update.message.reply_text("Ваш номер телефона не зарегистрирован. Перезапустите бота!")
+            return
+        success = move_orders_to_excel(phone, handle_payment_selection = "Наличными")
         if success:
             await update.message.reply_text("Ваши заказы успешно оплачены и перенесены в историю.")
         else:
             await update.message.reply_text("Нет заказов для оплаты.")
 
         payment_keyboard = [["Назад 🔙"]]
-        await update.message.reply_text("Для возвращения в меню нажмите Назад", reply_markup=ReplyKeyboardMarkup(payment_keyboard, resize_keyboard=True))
+        await update.message.reply_text("Для возвращения в меню нажмите Назад",
+                                        reply_markup=ReplyKeyboardMarkup(payment_keyboard, resize_keyboard=True))
         return
     elif selected_option == "Назад 🔙":
         await show_menu(update, context)
@@ -969,31 +1009,13 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f" *Цена*: {details['Цена']} рублей\n\n"
         )
 
-    keyboard = [["Оплатить 💳", "Назад 🔙", "Очистить корзину ❌"]]
+    keyboard = [["Оплатить картой💳", " Оплатить наличными", "Назад 🔙", "Очистить корзину ❌"]]
     await update.message.reply_text(
         cart_message,
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode="Markdown"
     )
 
-async def import_chat_ids(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-
-        if context.user_data.get("role") != "Администратор":
-            await update.message.reply_text("У вас нет прав для использования этой функции.")
-            return
-        user_data = load_user_data()
-        chat_ids_message = "Список chat_id пользователей:\n\n"
-        for user in user_data["users"]:
-            chat_ids_message += f"Имя: {user['name']}, chat_id: {user.get('chat_id', 'не указан')}\n"
-
-        await update.message.reply_text(chat_ids_message)
-    except Exception as e:
-        logger.error(f"Ошибка при импорте chat_id: {e}")
-        await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
-
-
-async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE, value=str):
+async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("role") != "Администратор":
         await update.message.reply_text("У вас нет прав для использования этой функции.")
         return
@@ -1069,7 +1091,7 @@ def main():
             fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
         )
 
-        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("start", under_start))
         application.add_handler(registration_handler)
         application.add_handler(broadcast_handler)
         application.add_handler(address_handler)
