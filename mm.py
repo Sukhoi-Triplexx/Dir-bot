@@ -1,11 +1,7 @@
 import emoji
-import re
 import json
 import logging
 import pandas as pd
-from numpy.ma.core import count
-from openpyxl.styles.builtins import total
-from pandas import value_counts
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton
 )
@@ -27,7 +23,7 @@ TOKEN = "8154269678:AAE-CLwwQi6ZHW_nQvgoDERzG6lsqt37htY"
 ORDERS_JSON = "Orders.json"
 CARD_NUMBER = "2222 3333 4444 5555"
 
-CHOOSE_ADDRESS, ENTER_NAME, BROADCAST_MESSAGE, ADD_ADDRESS = range(4)
+CHOOSE_ADDRESS, ENTER_NAME, BROADCAST_MESSAGE, ADD_ADDRESS, ENTER_PHONE, SELECT_ROLE, ADD_ADMIN = range(7)
 
 def load_data(file_path, default):
     try:
@@ -93,6 +89,7 @@ async def under_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        load_user_data()
         user_data = load_user_data()
         chat_id = update.message.chat_id
         if context.user_data.get("phone_verified"):
@@ -545,7 +542,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_menu(update, context)
         elif text == "Вернуться в главное меню":
             await show_main_menu(update, context)
-        elif text == "Очистить корзину":
+        elif text == "Очистить корзину❌":
             await clear_cart(update, context)
         elif text == "Выгрузка заказов":
             await import_excel(update, context)
@@ -601,42 +598,6 @@ async def clear_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка при очистке корзины: {e}")
         await update.message.reply_text("Ошибка при очистке корзины")
-
-async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-    logger.info(f"Получен callback_query с данными: {data}")
-
-    if data == "main_menu":
-        await show_main_menu(update, context)
-
-    elif data == "next_order":
-        await show_menu(update, context)
-
-    elif data == "pay_now":
-        await handle_payment_selection(update, context)
-
-    elif data.startswith("order_"):
-        next_day_str = data.replace("order_", "")
-        try:
-            datetime.strptime(next_day_str, '%d.%m.%Y')
-            context.user_data["selected_date"] = next_day_str
-            await show_menu(update, context)
-        except ValueError:
-            await query.edit_message_text(f"Некорректный формат даты: {next_day_str}. Используйте формат ДД.ММ.ГГГГ.")
-
-    elif re.match(r'\d{2}\.\d{2}\.\d{4}', data):
-        try:
-            datetime.strptime(data, '%d.%m.%Y')
-            context.user_data["selected_date"] = data
-            await handle_payment_selection(update, context)
-        except ValueError:
-            await query.edit_message_text(f"Некорректный формат даты: {data}. Используйте формат ДД.ММ.ГГГГ.")
-    
-    #else:
-        #await query.edit_message_text("Неизвестная команда. Пожалуйста, выберите действие из меню.")
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -1009,7 +970,7 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f" *Цена*: {details['Цена']} рублей\n\n"
         )
 
-    keyboard = [["Оплатить картой💳", " Оплатить наличными", "Назад 🔙", "Очистить корзину ❌"]]
+    keyboard = [["Оплатить картой💳", " Оплатить наличными", "Назад 🔙", "Очистить корзину❌"]]
     await update.message.reply_text(
         cart_message,
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
@@ -1101,7 +1062,6 @@ def main():
         application.add_handler(address_handler)
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
         application.add_handler(CallbackQueryHandler(handle_menu_and_lunch))
-        application.add_handler(CallbackQueryHandler(handle_callback_query))
 
         application.run_polling()
     except Exception as e:
