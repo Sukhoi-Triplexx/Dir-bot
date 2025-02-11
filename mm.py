@@ -2,6 +2,7 @@ import emoji
 import json
 import logging
 import pandas as pd
+import openpyxl
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton
 )
@@ -423,7 +424,7 @@ def move_orders_to_excel(phone, handle_payment_selection="Не оплачено"
         new_orders_df = pd.DataFrame(user_orders)
         orders_df = pd.concat([orders_df, new_orders_df], ignore_index=True)
 
-        orders_df.to_excel(orders_excel_path, index=False)
+        orders_df.to_excel(orders_excel_path, index=False, engine = "openpyxl", sheet_name='Sheet1')
 
 
         remaining_orders = [order for order in orders if order.get("Номер телефона") != phone]
