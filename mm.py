@@ -226,7 +226,7 @@ async def enter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now()
     days = [today + timedelta(days=i) for i in range(7)]
-    cutoff_time = time(10, 00) #ТУТ МЕНЯТЬ ВРЕМЯ 10 - ЧАСЫ; 00 - МИНУТЫ!!!!!!!!!!!!!!!!!!!!!!!!!
+    cutoff_time = time(20, 00) #ТУТ МЕНЯТЬ ВРЕМЯ 10 - ЧАСЫ; 00 - МИНУТЫ!!!!!!!!!!!!!!!!!!!!!!!!!
 
     keyboard = []
     days_of_week = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
@@ -1029,35 +1029,39 @@ async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if orders_df.empty:
         await update.message.reply_text("Заказов пока нет.")
         return
+
     today = datetime.today().date()
     todaystr = today.strftime("%d.%m.%Y")
     today_orders = orders_df[orders_df['Дата'] == todaystr]
-
     if today_orders.empty:
         await update.message.reply_text("Заказов на сегодня нет.")
         return
     dish_count = {}
+    dish_count_end = {}
     for index, row in today_orders.iterrows():
-        dish_name = row['Обед']
-        if dish_name in dish_count:
-            dish_count[dish_name] += 1
+        address = row['Адрес доставки']
+        dish = row['Обед']
+        if address not in dish_count:
+            dish_count[address] = {}
+
+        if dish not in dish_count[address]:
+            dish_count[address][dish] = 1
+            dish_count_end[dish] = 1
         else:
-            dish_count[dish_name] = 1
-    sorted_dishes = sorted(dish_count.items(), key=lambda x: x[0])
+            dish_count[address][dish] += 1
+            dish_count_end[dish] += 1
     orders_text = "Список заказов на сегодня:\n\n"
-    for index, row in today_orders.iterrows():
-        orders_text += (
-            f"Номер телефона: {row['Номер телефона']}\n"
-            f"Дата: {row['Дата']}\n"
-            f"Обед: {row['Обед']}\n"
-            f"Цена: {row['Цена']} рублей\n"
-            f"Статус оплаты: {row['Статус оплаты']}\n"
-            f"Адрес доставки: {row['Адрес доставки']}\n"
-            f"Имя заказчика: {row['Имя заказчика']}\n\n"
-        )
-    orders_text += "Итоговое количество блюд:\n"
-    for dish, count in sorted_dishes:
-        orders_text += f"{dish}: {count}\n"
+    for address, dishes in dish_count.items():
+        orders_text += f"Адрес доставки: {address}\n"
+        for dish, count in dishes.items():
+            orders_text += f"  - {dish}: {count}\n"
+        orders_text += "\n"
+
+    await update.message.reply_text(orders_text)
+
+    orders_text = "Итого:\n"
+    for dish, count in dish_count_end.items():
+        orders_text += f"  - {dish}: {count}\n"
 
     await update.message.reply_text(orders_text)
 
