@@ -427,7 +427,7 @@ def move_orders_to_excel(phone, handle_payment_selection="Не оплачено"
         
 
         with pd.ExcelWriter(orders_excel_path, engine="openpyxl", mode="a", if_sheet_exists='replace') as writer:
-            orders_df.to_excel(writer, sheet_name = 'Sheet1')
+            orders_df.to_excel(writer, sheet_name = 'Sheet1',index=False)
 
         remaining_orders = [order for order in orders if order.get("Номер телефона") != phone]
         with open(orders_json_path, "w", encoding="utf-8") as f:
