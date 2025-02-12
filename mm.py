@@ -1007,12 +1007,13 @@ async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         dish = row['Обед']
         if address not in dish_count:
             dish_count[address] = {}
-
         if dish not in dish_count[address]:
             dish_count[address][dish] = 1
-            dish_count_end[dish] = 1
         else:
             dish_count[address][dish] += 1
+        if dish not in dish_count_end:
+            dish_count_end[dish] = 1
+        else:
             dish_count_end[dish] += 1
     orders_text = "Список заказов на сегодня:\n\n"
     for address, dishes in dish_count.items():
