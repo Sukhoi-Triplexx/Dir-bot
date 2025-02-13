@@ -1,8 +1,8 @@
+import asyncio
 import emoji
 import json
 import logging
 import pandas as pd
-import openpyxl
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton
 )
@@ -11,6 +11,12 @@ from telegram.ext import (
     CallbackContext
 )
 from datetime import datetime, time, timedelta, date
+from yookassa import Configuration, Payment, payment
+import uuid
+
+#YooKassa settings
+
+Configuration.configure(account_id="1032619", secret_key="test_oAGk-KejRiNUifJhXcHtoBCXIiZYZB1E9YDHaBkEmUY")
 
 #logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -162,6 +168,69 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в команде start: {e}")
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
+async def pay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
+    try:
+        payment = Payment.create({
+            "amount": {
+                "value": "56000.00",  # Сумма платежа
+                "currency": "RUB"
+            },
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://your-return-url.com"  # Замените на ваш URL возврата
+            },
+            "capture": True,
+            "description": "Тестовый платеж"
+        })
+
+        # Сохраняем payment_id в контексте пользователя
+        context.user_data['payment_id'] = payment.id
+
+        # Отправляем пользователю ссылку на оплату
+        await update.message.reply_text(
+            f'Платеж создан! Перейдите по [ссылке]({payment.confirmation.confirmation_url}) для оплаты.',
+            parse_mode='Markdown'
+        )
+
+        # Запускаем асинхронную задачу для проверки статуса платежа
+        asyncio.create_task(check_payment_status(update, context, payment.id))
+
+    except Exception as e:
+        await update.message.reply_text(f'Ошибка при создании платежа: {str(e)}')
+
+async def check_payment_status(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_id: str) -> None:
+    while True:
+        await asyncio.sleep(10)
+
+        try:
+            payment = Payment.find_one(payment_id)
+            status = payment.status
+
+            if status == 'succeeded':
+                await update.message.reply_text(f'Платеж {payment_id} успешно завершен!')
+                break
+            elif status == 'canceled':
+                await update.message.reply_text(f'Платеж {payment_id} отменен.')
+                break
+            context.user_data['payment.status'] = status
+        except Exception as e:
+            await update.message.reply_text(f'Ошибка при проверке статуса платежа: {str(e)}')
+            break
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    payment_id = query.data.split("_")[2]
+
+    try:
+        payment = Payment.find_one(payment_id)
+        status = payment.status
+        await query.edit_message_text(f'Статус платежа {payment_id}: {status}')
+    except Exception as e:
+        await query.edit_message_text(f'Ошибка при проверке статуса платежа: {str(e)}')
+
 def get_role_keyboard(role):
     if role == "Администратор":
         return [["Список заказов", "Сообщить всем"], ["Добавить адрес доставки", "Выгрузка заказов"]]
@@ -257,7 +326,7 @@ async def handle_menu_and_lunch(update: Update, context: ContextTypes.DEFAULT_TY
             menu_data = pd.read_csv(MENU)
             menu_data['Цена'] = menu_data['Цена'].astype(str) + ' рублей'
 
-            week_number = selected_date_full.isocalendar()[1] % 2  
+            week_number = selected_date_full.isocalendar()[1] % 2
 
             daily_menu = menu_data[(menu_data['День недели'] == selected_day_name) & (menu_data['Неделя'] == week_number)]
 
@@ -405,38 +474,52 @@ async def handle_menu_and_lunch(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(f"Ошибка при записи заказа: {e}")
             return
 
-def move_orders_to_excel(phone, handle_payment_selection="Не оплачено", orders_json_path=ORDERS_JSON, orders_excel_path="Заказы.xlsx"):
+async def move_orders_to_excel(phone, handle_payment_selection="Не оплачено", orders_json_path="orders.json", orders_excel_path="Заказы.xlsx"):
     try:
         with open(orders_json_path, "r", encoding="utf-8") as f:
             orders = json.load(f)
 
         user_orders = [order for order in orders if order.get("Номер телефона") == phone]
         if not user_orders:
-            return False
-
+            return False, []
+        order_id = str(uuid.uuid4())
+        order_ids = []
         for order in user_orders:
+            order['order_id'] = order_id
             order['Статус оплаты'] = handle_payment_selection
+            order_ids.append(order_id)
         try:
             orders_df = pd.read_excel(orders_excel_path)
         except FileNotFoundError:
-            orders_df = pd.DataFrame(columns=["Номер телефона", "Дата", "День недели", "Обед", "Цена", "Статус оплаты", "Имя заказчика", "Адрес доставки"])
+            orders_df = pd.DataFrame(columns=[
+                  # Новая колонка для идентификатора заказа
+                "Номер телефона",
+                "Дата",
+                "Обед",
+                "Цена",
+                "Статус оплаты",
+                "День недели",
+                "Адрес доставки",
+                "Имя заказчика",
+                "order_id"
+            ])
 
         new_orders_df = pd.DataFrame(user_orders)
         orders_df = pd.concat([orders_df, new_orders_df], ignore_index=True)
 
-        
 
         with pd.ExcelWriter(orders_excel_path, engine="openpyxl", mode="a", if_sheet_exists='replace') as writer:
-            orders_df.to_excel(writer, sheet_name = 'Sheet1',index=False)
+            orders_df.to_excel(writer, sheet_name='Sheet1', index=False)
 
         remaining_orders = [order for order in orders if order.get("Номер телефона") != phone]
         with open(orders_json_path, "w", encoding="utf-8") as f:
             json.dump(remaining_orders, f, ensure_ascii=False, indent=4)
 
-        return True
+        return True, order_ids
 
     except Exception as e:
-        return False
+        print(f"Ошибка: {e}")
+        return False, []
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -531,10 +614,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif text == "Цезарь с курицей":
             await handle_salad(update, context, "Цезарь с курицей")
         elif text == "Оплатить картой💳":
-            if update.callback_query:
-                    pass
-            else:
-                    await handle_payment_selection(update, context)
+            await pay(update, context)
         elif text == "Назад 🔙":
             await show_menu(update, context)
         elif text == "Нет, спасибо":
@@ -670,6 +750,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_drink(update: Update, context: ContextTypes.DEFAULT_TYPE, drink_name: str):
     user_data = load_user_data()
+    pay = context.user_data.get("payment_id")
     try:
             phone = context.user_data.get("phone_number")
             user = next((u for u in user_data["users"] if u["phone"] == phone), None)
@@ -716,7 +797,7 @@ async def handle_drink(update: Update, context: ContextTypes.DEFAULT_TYPE, drink
                 "Цена": int(price),
                 "Статус оплаты": "Не оплачено",
                 "Адрес доставки": address,
-                "Имя заказчика": user["name"]
+                "Имя заказчика": user["name"],
                 }
                 try:
                     with open(ORDERS_JSON, 'r', encoding='utf-8') as f:
@@ -790,7 +871,7 @@ async def handle_salad(update: Update, context: ContextTypes.DEFAULT_TYPE, salad
                 "Цена": int(price),
                 "Статус оплаты": "Не оплачено",
                 "Адрес доставки": address,
-                "Имя заказчика": user["name"]
+                "Имя заказчика": user["name"],
                 }
                 try:
                     with open(ORDERS_JSON, 'r', encoding='utf-8') as f:
@@ -895,41 +976,35 @@ async def handle_complex_lunch(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_option = update.message.text
+    phone = context.user_data.get("phone_number")
+
+    if phone is None:
+        await update.message.reply_text("Ваш номер телефона не зарегистрирован. Перезапустите бота!")
+        return
+
     if selected_option == "Оплатить картой💳":
-        phone = context.user_data.get("phone_number")
-        if phone is None:
-            await update.message.reply_text("Ваш номер телефона не зарегистрирован. Перезапустите бота!")
-            return
-        success = move_orders_to_excel(phone, handle_payment_selection = "Картой")
-        if success:
-            await update.message.reply_text(f"Переведите на карту: " + CARD_NUMBER)
-        else:
-            await update.message.reply_text("Нет заказов для оплаты.")
-
-        payment_keyboard = [["Назад 🔙"]]
-        await update.message.reply_text("Для возвращения в меню нажмите Назад",
-                                        reply_markup=ReplyKeyboardMarkup(payment_keyboard, resize_keyboard=True))
-        return
+        payment_method = "Картой"
+        payment_message = f"Переведите на карту: {CARD_NUMBER}"
+    elif selected_option == "Оплатить наличными":
+        payment_method = "Наличными"
+        payment_message = "Ваши заказы успешно оплачены и перенесены в историю."
     elif selected_option == "Назад 🔙":
         await show_menu(update, context)
-
-    if selected_option == "Оплатить наличными":
-        phone = context.user_data.get("phone_number")
-        if phone is None:
-            await update.message.reply_text("Ваш номер телефона не зарегистрирован. Перезапустите бота!")
-            return
-        success = move_orders_to_excel(phone, handle_payment_selection = "Наличными")
-        if success:
-            await update.message.reply_text("Ваши заказы успешно оплачены и перенесены в историю.")
-        else:
-            await update.message.reply_text("Нет заказов для оплаты.")
-
-        payment_keyboard = [["Назад 🔙"]]
-        await update.message.reply_text("Для возвращения в меню нажмите Назад",
-                                        reply_markup=ReplyKeyboardMarkup(payment_keyboard, resize_keyboard=True))
         return
-    elif selected_option == "Назад 🔙":
-        await show_menu(update, context)
+    else:
+        await update.message.reply_text("Неизвестная команда. Пожалуйста, выберите один из вариантов.")
+        return
+
+    success, order_id = await move_orders_to_excel(phone, handle_payment_selection=payment_method)
+    if success:
+        await update.message.reply_text(payment_message)
+    else:
+        await update.message.reply_text("Нет заказов для оплаты.")
+    payment_keyboard = [["Назад 🔙"]]
+    await update.message.reply_text(
+        "Для возвращения в меню нажмите Назад",
+        reply_markup=ReplyKeyboardMarkup(payment_keyboard, resize_keyboard=True)
+    )
 
 async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = context.user_data.get("phone_number")
@@ -972,11 +1047,10 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f" *Состав заказа*: {', '.join(details['Блюда'])}\n"
             f" *Цена*: {details['Цена']} рублей\n\n"
         )
-
-    keyboard = [["Оплатить картой💳", " Оплатить наличными", "Назад 🔙", "Очистить корзину❌"]]
+    keyboard1 = [[ "Оплатить картой💳", "Оплатить наличными", "Назад 🔙", "Очистить корзину❌"]]
     await update.message.reply_text(
         cart_message,
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        reply_markup=ReplyKeyboardMarkup(keyboard1, resize_keyboard=True),
     )
 
 async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1030,7 +1104,6 @@ async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(orders_text)
 
-
 def main():
     try:
         application = Application.builder().token(TOKEN).build()
@@ -1059,13 +1132,13 @@ def main():
             },
             fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
         )
-
         application.add_handler(CommandHandler("start", under_start))
         application.add_handler(registration_handler)
         application.add_handler(broadcast_handler)
         application.add_handler(address_handler)
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
         application.add_handler(CallbackQueryHandler(handle_menu_and_lunch))
+        application.add_handler(CallbackQueryHandler(button_callback))
 
         application.run_polling()
     except Exception as e:
