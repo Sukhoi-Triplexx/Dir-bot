@@ -26,7 +26,7 @@ DATA_FILE = "Data.json"
 ORDERS = "Заказы.xlsx"
 MENU = "https://docs.google.com/spreadsheets/d/1eEEHGwtSV2znQDGJcgGVEQ2PzNTLoDPOT-9vtyQCoQY/export?format=csv"
 ADDRESSES_FILE = "Addresses.json" 
-TOKEN = "8178914232:AAEHHs8edmiStNxA5FelDC16fTo-NVidNaM"
+TOKEN = "7814928433:AAGERulnnNOIvqbKp6IcQ-0yytP0szoSp9A"
 ORDERS_JSON = "Orders.json"
 CARD_NUMBER = "2222 3333 4444 5555"
 
