@@ -26,7 +26,7 @@ DATA_FILE = "Data.json"
 ORDERS = "Заказы.xlsx"
 MENU = "https://docs.google.com/spreadsheets/d/1eEEHGwtSV2znQDGJcgGVEQ2PzNTLoDPOT-9vtyQCoQY/export?format=csv"
 ADDRESSES_FILE = "Addresses.json" 
-TOKEN = "8154269678:AAE-CLwwQi6ZHW_nQvgoDERzG6lsqt37htY"
+TOKEN = "8178914232:AAEHHs8edmiStNxA5FelDC16fTo-NVidNaM"
 ORDERS_JSON = "Orders.json"
 CARD_NUMBER = "2222 3333 4444 5555"
 
@@ -167,56 +167,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка в команде start: {e}")
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
-
-async def pay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
-    try:
-        payment = Payment.create({
-            "amount": {
-                "value": "56000.00",  # Сумма платежа
-                "currency": "RUB"
-            },
-            "confirmation": {
-                "type": "redirect",
-                "return_url": "https://your-return-url.com"  # Замените на ваш URL возврата
-            },
-            "capture": True,
-            "description": "Тестовый платеж"
-        })
-
-        # Сохраняем payment_id в контексте пользователя
-        context.user_data['payment_id'] = payment.id
-
-        # Отправляем пользователю ссылку на оплату
-        await update.message.reply_text(
-            f'Платеж создан! Перейдите по [ссылке]({payment.confirmation.confirmation_url}) для оплаты.',
-            parse_mode='Markdown'
-        )
-
-        # Запускаем асинхронную задачу для проверки статуса платежа
-        asyncio.create_task(check_payment_status(update, context, payment.id))
-
-    except Exception as e:
-        await update.message.reply_text(f'Ошибка при создании платежа: {str(e)}')
-
-async def check_payment_status(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_id: str) -> None:
-    while True:
-        await asyncio.sleep(10)
-
-        try:
-            payment = Payment.find_one(payment_id)
-            status = payment.status
-
-            if status == 'succeeded':
-                await update.message.reply_text(f'Платеж {payment_id} успешно завершен!')
-                break
-            elif status == 'canceled':
-                await update.message.reply_text(f'Платеж {payment_id} отменен.')
-                break
-            context.user_data['payment.status'] = status
-        except Exception as e:
-            await update.message.reply_text(f'Ошибка при проверке статуса платежа: {str(e)}')
-            break
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -974,7 +924,9 @@ async def handle_complex_lunch(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Ошибка при обработке комплексного обеда: {e}")
         await update.message.reply_text("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
+
 async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает выбор способа оплаты."""
     selected_option = update.message.text
     phone = context.user_data.get("phone_number")
 
@@ -983,11 +935,16 @@ async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT
         return
 
     if selected_option == "Оплатить картой💳":
-        payment_method = "Картой"
-        payment_message = f"Переведите на карту: {CARD_NUMBER}"
+        await pay(update, context)  # Запускаем процесс создания платежа
+        return
+
     elif selected_option == "Оплатить наличными":
-        payment_method = "Наличными"
-        payment_message = "Ваши заказы успешно оплачены и перенесены в историю."
+        success, order_id = await move_orders_to_excel(phone, "Наличными")
+        if success:
+            await update.message.reply_text("Оплата наличными подтверждена. Ваш заказ перенесён в историю.")
+        else:
+            await update.message.reply_text("Ошибка при переносе заказа в историю.")
+
     elif selected_option == "Назад 🔙":
         await show_menu(update, context)
         return
@@ -995,18 +952,68 @@ async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("Неизвестная команда. Пожалуйста, выберите один из вариантов.")
         return
 
-    success, order_id = await move_orders_to_excel(phone, handle_payment_selection=payment_method)
-    if success:
-        await update.message.reply_text(payment_message)
-    else:
-        await update.message.reply_text("Нет заказов для оплаты.")
     payment_keyboard = [["Назад 🔙"]]
     await update.message.reply_text(
         "Для возвращения в меню нажмите Назад",
         reply_markup=ReplyKeyboardMarkup(payment_keyboard, resize_keyboard=True)
     )
 
+
+async def pay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Создаёт платёж с суммой из корзины."""
+    total_price = context.user_data.get("total_price", 0)
+    if total_price == 0:
+        await update.message.reply_text("Ваша корзина пуста, оплатить нечего.")
+        return
+
+    try:
+        payment = Payment.create({
+            "amount": {"value": f"{total_price}.00", "currency": "RUB"},
+            "confirmation": {"type": "redirect", "return_url": "https://t.me/DirTasteBot"},
+            "capture": True,
+            "description": f"Оплата заказа на сумму {total_price} рублей"
+        })
+
+        context.user_data['payment_id'] = payment.id  # Сохраняем ID платежа
+
+        await update.message.reply_text(
+            f'Платёж создан! Перейдите по ссылке({payment.confirmation.confirmation_url}) для оплаты.',
+            parse_mode='Markdown'
+        )
+
+        asyncio.create_task(check_payment_status(update, context, payment.id))
+
+    except Exception as e:
+        await update.message.reply_text(f'Ошибка при создании платежа: {str(e)}')
+
+async def check_payment_status(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_id: str) -> None:
+    while True:
+        await asyncio.sleep(10)  # Проверяем статус каждые 10 секунд
+
+        try:
+            payment = Payment.find_one(payment_id)
+            status = payment.status
+
+            if status == 'succeeded':
+                phone = context.user_data.get("phone_number")
+                if phone:
+                    success, order_id = await move_orders_to_excel(phone, "Картой")
+                    if success:
+                        await update.message.reply_text("Оплата прошла успешно! Ваш заказ перенесён в историю.")
+                    else:
+                        await update.message.reply_text("Ошибка при переносе заказа в историю.")
+                break
+            elif status == 'canceled':
+                await update.message.reply_text(f'Платеж {payment_id} отменен.')
+                break
+            context.user_data['payment.status'] = status
+        except Exception as e:
+            await update.message.reply_text(f'Ошибка при проверке статуса платежа: {str(e)}')
+            break
+
+
 async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отображает корзину пользователя и сохраняет сумму заказа в context.user_data."""
     phone = context.user_data.get("phone_number")
     if phone is None:
         await update.message.reply_text("Ваш номер телефона не зарегистрирован. Перезапустите бота!")
@@ -1015,22 +1022,17 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with open(ORDERS_JSON, "r", encoding="utf-8") as f:
             orders = json.load(f)
-    except FileNotFoundError:
-        await update.message.reply_text("Заказов пока нет.")
-        return
-    except json.JSONDecodeError:
-        await update.message.reply_text("Ошибка при чтении файла заказов.")
+    except (FileNotFoundError, json.JSONDecodeError):
+        await update.message.reply_text("Ошибка при загрузке заказов.")
         return
 
     user_orders = [order for order in orders if order.get("Номер телефона") == phone]
-    
 
     if not user_orders:
         await update.message.reply_text("Ваша корзина пуста.")
         return
 
     from collections import defaultdict
-
     grouped_orders = defaultdict(lambda: {"Блюда": [], "Цена": 0, "День недели": ""})
 
     for order in user_orders:
@@ -1040,6 +1042,9 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         grouped_orders[date]["Цена"] += price
         grouped_orders[date]["День недели"] = order["День недели"]
 
+    total_price = sum(details["Цена"] for details in grouped_orders.values())  # Общая сумма
+    context.user_data["total_price"] = total_price  # Сохраняем сумму в context.user_data
+
     cart_message = "Ваша корзина:\n\n"
     for date, details in grouped_orders.items():
         cart_message += (
@@ -1047,10 +1052,13 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f" *Состав заказа*: {', '.join(details['Блюда'])}\n"
             f" *Цена*: {details['Цена']} рублей\n\n"
         )
-    keyboard1 = [[ "Оплатить картой💳", "Оплатить наличными", "Назад 🔙", "Очистить корзину❌"]]
+    cart_message += f"*Общая сумма*: {total_price} рублей"
+
+    keyboard = [["Оплатить картой💳", "Оплатить наличными", "Назад 🔙", "Очистить корзину❌"]]
     await update.message.reply_text(
         cart_message,
-        reply_markup=ReplyKeyboardMarkup(keyboard1, resize_keyboard=True),
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
     )
 
 async def show_all_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
